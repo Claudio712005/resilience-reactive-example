@@ -158,10 +158,8 @@ class PricingHttpAdapterTest {
                         "http://localhost:" + wireMockServer.port(),
                         Duration.ofMillis(500),
                         Duration.ofSeconds(3),
-                        timeLimiterTimeout,
                         20,
-                        Duration.ofMillis(500),
-                        true)));
+                        Duration.ofMillis(500))));
 
         WebClientFactory webClientFactory = new WebClientFactory(WebClient.builder(), properties);
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
@@ -189,7 +187,7 @@ class PricingHttpAdapterTest {
                 TimerRegistry.ofDefaults(meterRegistry),
                 meterRegistry);
 
-        return new PricingHttpAdapter(webClientFactory, pipelineFactory, Schedulers.boundedElastic());
+        return new PricingHttpAdapter(webClientFactory, pipelineFactory, Schedulers.parallel());
     }
 
     private RetryConfig defaultRetry() {
