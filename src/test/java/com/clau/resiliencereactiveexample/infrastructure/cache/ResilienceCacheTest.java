@@ -3,7 +3,6 @@ package com.clau.resiliencereactiveexample.infrastructure.cache;
 import com.clau.resiliencereactiveexample.config.CacheProperties;
 import com.clau.resiliencereactiveexample.infrastructure.chaos.ChaosSwitch;
 import com.clau.resiliencereactiveexample.resilience.ResiliencePipelineFactory;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -22,6 +21,7 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 
@@ -82,6 +82,7 @@ class ResilienceCacheTest {
         StepVerifier.create(cache.find(REGION, KEY, Payload.class)).verifyComplete();
 
         assertThat(counter("error", "remote")).isEqualTo(1.0d);
+        assertThat(counter("miss", "remote")).isEqualTo(0.0d);
     }
 
     @Test
@@ -167,7 +168,7 @@ class ResilienceCacheTest {
                 TimerRegistry.ofDefaults(meterRegistry),
                 meterRegistry);
 
-        return new ResilienceCache(redisTemplate, new ObjectMapper(), properties,
+        return new ResilienceCache(redisTemplate, JsonMapper.builder().build(), properties,
                 chaosSwitch, meterRegistry, pipelineFactory);
     }
 
