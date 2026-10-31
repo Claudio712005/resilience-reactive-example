@@ -41,9 +41,10 @@ public class RatingHttpAdapter implements RatingPort {
                         .defaultIfEmpty("")
                         .map(body -> new DownstreamClientException(ResilienceNames.RATING_SERVICE, response.statusCode().value(), body)))
                 .bodyToMono(RatingResponse.class)
+                .publishOn(integrationScheduler)
                 .map(response -> toDomain(sku, response));
 
-        return pipeline.protect(call).subscribeOn(integrationScheduler);
+        return pipeline.protect(call);
     }
 
     private Rating toDomain(String sku, RatingResponse response) {
