@@ -1,0 +1,17 @@
+{
+  "name": "rating client error is not a circuit breaker failure",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/ratings/v1/products/SKU-TECL-0005"
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "no reviews for this product"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "rating default",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/ratings/v1/products/[A-Za-z0-9-]+"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "{{request.pathSegments.[3]}}",
+      "average": 4.6,
+      "reviewCount": 318
+    },
+    "fixedDelayMilliseconds": 120,
+    "transformers": ["response-template"]
+  }
+}

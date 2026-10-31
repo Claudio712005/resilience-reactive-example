@@ -1,0 +1,20 @@
+{
+  "name": "inventory slow response",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/inventory/v1/availability/SKU-SLOW-9001"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "SKU-SLOW-9001",
+      "quantity": 7,
+      "warehouse": "SP-OSASCO-02"
+    },
+    "fixedDelayMilliseconds": 2000
+  }
+}

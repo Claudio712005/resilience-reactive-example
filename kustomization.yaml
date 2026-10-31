@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - k8s/base
+
+configMapGenerator:
+  - name: wiremock-mappings
+    namespace: catalog
+    files:
+      - docker/wiremock/mappings/pricing-default.json
+      - docker/wiremock/mappings/pricing-slow.json
+      - docker/wiremock/mappings/pricing-fail.json
+      - docker/wiremock/mappings/pricing-flaky-attempt-1.json
+      - docker/wiremock/mappings/pricing-flaky-attempt-2.json
+      - docker/wiremock/mappings/pricing-flaky-recovered.json
+      - docker/wiremock/mappings/inventory-default.json
+      - docker/wiremock/mappings/inventory-slow.json
+      - docker/wiremock/mappings/rating-default.json
+      - docker/wiremock/mappings/rating-fail.json
+      - docker/wiremock/mappings/rating-not-found.json
+  - name: grafana-dashboards
+    namespace: catalog
+    files:
+      - docker/grafana/dashboards/resilience-overview.json
+      - docker/grafana/dashboards/catalog-runtime.json
+
+generatorOptions:
+  disableNameSuffixHash: true

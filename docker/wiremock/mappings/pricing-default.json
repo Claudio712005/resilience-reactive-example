@@ -1,0 +1,22 @@
+{
+  "name": "pricing default quote",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/pricing/v1/quotes/[A-Za-z0-9-]+"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "{{request.pathSegments.[3]}}",
+      "finalPrice": 1299.9,
+      "currency": "BRL",
+      "discountPercentage": 10.0
+    },
+    "fixedDelayMilliseconds": 80,
+    "transformers": ["response-template"]
+  }
+}
