@@ -1,0 +1,17 @@
+{
+  "name": "rating permanent failure",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/ratings/v1/products/SKU-FAIL-9002"
+  },
+  "response": {
+    "status": 503,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "rating service unavailable"
+    }
+  }
+}

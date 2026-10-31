@@ -1,0 +1,17 @@
+{
+  "name": "pricing permanent server error",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/pricing/v1/quotes/SKU-FAIL-9002"
+  },
+  "response": {
+    "status": 500,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "pricing engine unavailable"
+    }
+  }
+}
