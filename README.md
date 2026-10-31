@@ -65,8 +65,9 @@ Retry( CircuitBreaker( RateLimiter( TimeLimiter( Bulkhead( chamada ))))) ─► 
 | `pricing-service` | 800 ms | 30 concorrentes | 200/s | 3 tentativas, backoff exp. 50 ms ×2 ± 50% | connect 200 ms / response 900 ms | 50% falha ou 60% slow (>800 ms) |
 | `inventory-service` | 600 ms | 40 concorrentes | 300/s | 3 tentativas | connect 200 ms / response 700 ms | 50% falha ou 60% slow (>600 ms) |
 | `rating-service` | 400 ms | 20 concorrentes | 150/s | 2 tentativas, backoff 30 ms | connect 150 ms / response 500 ms | 60% falha (menos crítico) |
-| `product-database-read` | 1500 ms | 60 concorrentes (espera 50 ms) | 1000/s | 2 tentativas | pool R2DBC: acquire 2 s | 50% falha, janela de 50 |
-| `product-database-write` | 2500 ms | 20 concorrentes (espera 100 ms) | 100/s | sem retry (escrita não idempotente) | — | 50% falha |
+| `product-database-read` | 1500 ms | 60 concorrentes | 1000/s | 2 tentativas | pool R2DBC: acquire 2 s | 50% falha, janela de 50 |
+| `product-database-list` | 3000 ms | 20 concorrentes | 200/s | sem retry | pool R2DBC: acquire 2 s | 50% falha, janela de 30 |
+| `product-database-write` | 2500 ms | 20 concorrentes | 100/s | sem retry (escrita não idempotente) | — | 50% falha |
 | `product-cache` (Redis) | 150 ms | 100 concorrentes | 5000/s | sem retry | timeout de comando 150 ms | 40% falha ou slow >150 ms |
 
 Pontos de projeto relevantes:
@@ -74,7 +75,7 @@ Pontos de projeto relevantes:
 - **Backoff exponencial com jitter** (`randomized-wait-factor: 0.5`) evita retry storm sincronizado.
 - **4xx não é falha de infraestrutura:** respostas de cliente viram `DownstreamClientException`, que está em `ignore-exceptions` do circuit breaker e do retry. Só 5xx, timeout e erro de conexão contam para abrir o circuito.
 - **`CallNotPermittedException`, `RequestNotPermitted` e `BulkheadFullException` nunca são reexecutadas** — estão em `ignore-exceptions` do retry, evitando amplificar carga em sistema já saturado.
-- **Bulkhead semafórico** (não thread pool): é o único compatível com fluxo não bloqueante.
+- **Bulkhead semafórico** (não thread pool): é o único compatível com fluxo não bloqueante, e com `max-wait-duration: 0` em todas as instâncias — espera por permissão bloqueia a thread reativa (ver decisão **D20**).
 - **Sem retry na escrita e no cache**, por escolha explícita: escrita não é idempotente e retry em cache só adiciona latência ao caminho de fallback.
 - **Cache não é gravado quando a view está degradada**, para não congelar dados de fallback pelo TTL inteiro.
 
@@ -83,11 +84,12 @@ Pontos de projeto relevantes:
 ## 3. Multithread e operações não bloqueantes
 
 - Toda a cadeia é `Mono`/`Flux`; não há `block()` no caminho de request.
-- Três schedulers dedicados e dimensionados (`SchedulerConfig`), para que a saturação de um domínio não contamine o event loop do Netty:
-  - `catalog-integration` (bounded elastic) — chamadas HTTP de saída;
-  - `catalog-persistence` (bounded elastic) — acesso R2DBC;
-  - `catalog-enrichment` (parallel) — composição/CPU.
-- O enriquecimento dos três downstreams roda em **paralelo real** via `Mono.zip`, cada ramo com `subscribeOn` no scheduler de integração.
+- Três schedulers dedicados e dimensionados (`SchedulerConfig`), para que o processamento pós-I/O não ocupe o event loop do Netty:
+  - `catalog-integration` (bounded elastic) — desserialização e mapeamento das respostas HTTP;
+  - `catalog-persistence` (bounded elastic) — mapeamento das linhas vindas do R2DBC;
+  - `catalog-enrichment` (parallel) — composição da view.
+- O deslocamento é feito com `publishOn` logo após o I/O, não com `subscribeOn`: as fontes já são não bloqueantes, e o que precisa sair do event loop é o trabalho **depois** da resposta (ver decisão **D8**).
+- O enriquecimento dos três downstreams roda em **paralelo real** via `Mono.zip`, com cada ramo publicando no scheduler de integração.
 - `GET /api/v1/products/views?skus=a,b,c` usa `Flux.parallel().runOn(...)` para resolver vários SKUs simultaneamente.
 - Propagação de contexto entre threads via `Hooks.enableAutomaticContextPropagation()` + `ThreadLocalAccessor` próprio, o que mantém o MDC correto mesmo depois de troca de scheduler.
 - Logging assíncrono (`AsyncAppender` com `neverBlock=true`) para que I/O de log não bloqueie thread reativa.
@@ -209,6 +211,7 @@ Mapeamento de erro → status: `404` SKU inexistente, `409` SKU duplicado, `400`
 ## 7. Roteiro de demonstração
 
 ```bash
+./scripts/smoke-test.sh          # 26 asserções end-to-end contra a stack, com exit code
 ./scripts/demo-resilience.sh     # 7 cenários: cache, timeout, circuito, retry, Redis fora, banco fora, métricas
 ./scripts/load-test.sh           # carga para popular os dashboards (CONCURRENCY/DURATION_SECONDS configuráveis)
 ```
@@ -229,7 +232,7 @@ curl -X POST "http://localhost:8080/api/v1/chaos/reset"
 ./mvnw test
 ```
 
-28 testes, sem necessidade de Docker:
+30 testes, sem necessidade de Docker:
 
 | Suíte | O que cobre |
 |---|---|
@@ -238,8 +241,11 @@ curl -X POST "http://localhost:8080/api/v1/chaos/reset"
 | `PricingHttpAdapterTest` | HTTP real contra WireMock: mapeamento, propagação de headers de rastreio, recuperação por retry, 4xx sem retry, timeout |
 | `ResilienceCacheTest` | promoção L2→L1, degradação silenciosa em falha do Redis, chaos switch, miss, write-through com TTL, cache desligado |
 | `TraceContextWebFilterTest` | reaproveitamento de identificadores recebidos e geração/eco dos ausentes |
+| `ProductViewSerializationTest` | round-trip JSON da view, que é o formato gravado no Redis (incluindo `Instant`) |
 
-O stack completo (Compose/kind) é validado pelos scripts de demonstração e carga, não por Testcontainers — ver decisão **D7** em [`docs/DECISOES.md`](docs/DECISOES.md).
+O stack completo (Compose/kind) é validado por `scripts/smoke-test.sh`, não por Testcontainers — ver decisão **D13** em [`docs/DECISOES.md`](docs/DECISOES.md).
+
+A inicialização do contexto foi verificada subindo o jar sem Postgres e sem Redis (`--spring.flyway.enabled=false --spring.r2dbc.pool.initial-size=0`): a aplicação sobe em ~2 s, `/actuator/health` lista os sete circuitos, a chamada de produto responde `503 CATALOG_UNAVAILABLE` com `requestId`/`correlationId` no corpo e nos headers, e o Redis fora aparece apenas como `resilience4j_cache_calls_total{kind="error"}` — sem erro para o cliente.
 
 ---
 
@@ -261,7 +267,7 @@ src/main/java/com/clau/resiliencereactiveexample
 
 docker/                  compose assets: wiremock, prometheus, grafana (datasource + dashboards)
 k8s/                     kind-cluster.yaml e manifests (base) aplicados via kustomize da raiz
-scripts/                 kind-up/down, demo-resilience, load-test
+scripts/                 kind-up/down, smoke-test, demo-resilience, load-test
 docs/DECISOES.md         registro das decisões de arquitetura
 ```
 

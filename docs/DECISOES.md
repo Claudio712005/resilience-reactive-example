@@ -74,13 +74,13 @@ Registro das escolhas tomadas durante a construção do serviço, com alternativ
 
 ---
 
-## D8 — Três schedulers dedicados em vez do event loop do Netty
+## D8 — Schedulers dedicados aplicados com `publishOn`, não `subscribeOn`
 
-**Decisão:** `catalog-integration` e `catalog-persistence` (bounded elastic) e `catalog-enrichment` (parallel), dimensionados por propriedade.
+**Decisão:** três schedulers (`catalog-integration` e `catalog-persistence` bounded elastic, `catalog-enrichment` parallel), aplicados com `publishOn` imediatamente após o I/O — não com `subscribeOn` na cadeia inteira.
 
-**Por quê:** isolamento por domínio de falha. Saturar as chamadas HTTP de saída não deve impedir o event loop de aceitar novas conexões nem travar o acesso ao banco.
+**Por quê:** a primeira versão usava `subscribeOn` nos adapters HTTP e no adapter R2DBC. Isso é enganoso: `subscribeOn` só move a chamada de `subscribe()` e o trabalho síncrono de montagem. WebClient e R2DBC são não bloqueantes, então o I/O continua sendo concluído no event loop do Netty independentemente do `subscribeOn` — o que precisava sair do event loop era a desserialização e o mapeamento, ou seja, o trabalho **posterior** à resposta. `publishOn` logo após `bodyToMono`/a query é o operador que realmente faz isso.
 
-**Consequência:** mais threads do que o mínimo teórico de um stack reativo puro, e troca de contexto entre schedulers. É o preço do isolamento — e o motivo pelo qual a propagação de MDC precisou de `ThreadLocalAccessor` próprio (D9).
+**Consequência:** o event loop volta a ficar livre após entregar os bytes, e os schedulers passam a representar isolamento real de CPU por domínio. O custo é uma troca de contexto por chamada — e é o motivo pelo qual a propagação de MDC precisou de `ThreadLocalAccessor` próprio (D9).
 
 ---
 
@@ -126,11 +126,13 @@ Registro das escolhas tomadas durante a construção do serviço, com alternativ
 
 ## D13 — Testes: unitários e WireMock, sem Testcontainers
 
-**Decisão:** 28 testes que rodam sem Docker (pipeline de resiliência, serviço de aplicação com fakes, adapter HTTP real contra WireMock embarcado, cache com mocks do template reativo, filtro de rastreio). A validação do stack completo fica nos scripts `demo-resilience.sh` e `load-test.sh`.
+**Decisão:** 30 testes que rodam sem Docker (pipeline de resiliência, serviço de aplicação com fakes, adapter HTTP real contra WireMock embarcado, cache com mocks do template reativo, filtro de rastreio). A validação do stack completo fica em `scripts/smoke-test.sh` (asserções com exit code) e nos scripts `demo-resilience.sh` e `load-test.sh`.
 
 **Por quê:** o Docker não estava disponível no ambiente de construção, e a versão de Testcontainers gerenciada pelo Spring Boot 4.1.2 é a linha 2.x, com API diferente da 1.x. Escrever um teste de integração que não pode ser executado seria entregar código não verificado — pior do que não entregar.
 
 **Consequência:** a cobertura de integração real (Postgres + Redis + WireMock juntos) é feita por script, de forma observável mas não automatizada em CI. Adicionar um módulo de teste com Testcontainers 2.x é o próximo passo natural, com Docker disponível.
+
+Complementando, a inicialização do contexto foi validada manualmente subindo o jar sem Postgres e sem Redis. Esse passo pagou-se de imediato: encontrou os dois defeitos descritos em **D18** e **D19**, que nenhum teste unitário pegaria porque nenhum deles levanta o contexto Spring.
 
 ---
 
@@ -171,3 +173,55 @@ Registro das escolhas tomadas durante a construção do serviço, com alternativ
 **Por quê:** demonstrar degradação exige provocar falha. Derrubar o container do Redis funciona, mas é lento e não permite latência controlada.
 
 **Consequência:** o endpoint não tem autenticação neste exemplo. Em ambiente real ele precisa ficar atrás de autorização ou de um profile exclusivo de laboratório.
+
+---
+
+## D18 — Jackson 3 (`tools.jackson`) para serializar o que vai ao Redis
+
+**Decisão:** `ResilienceCache` injeta `tools.jackson.databind.json.JsonMapper`, não `com.fasterxml.jackson.databind.ObjectMapper`.
+
+**Por quê:** Spring Boot 4 traz Jackson 2 e Jackson 3 no classpath, mas o `JacksonAutoConfiguration` expõe apenas o mapper do Jackson 3 (`tools.jackson...JsonMapper`). A primeira versão injetava o `ObjectMapper` do Jackson 2 — não existe bean desse tipo, e a aplicação **não subia**. O teste unitário não pegou porque construía o mapper na mão; só a subida real do contexto revelou.
+
+Há um segundo efeito: o Jackson 2 presente no classpath está sem `jackson-datatype-jsr310`, então serializar `java.time.Instant` falha. Como `ProductView` tem `createdAt`, e como o cache engole erro de serialização por projeto, o Redis nunca teria gravado nada — uma falha silenciosa. O Jackson 3 trata `java.time` nativamente.
+
+**Consequência:** o `ProductViewSerializationTest` foi adicionado para travar esse comportamento, fazendo round-trip da view exatamente como ela vai para o Redis.
+
+---
+
+## D19 — Lettuce sem pool de conexões
+
+**Decisão:** `spring.data.redis.lettuce.pool` removido da configuração.
+
+**Por quê:** ativar o pool exige `commons-pool2` no classpath; sem ele a criação do `LettuceConnectionFactory` lança `NoClassDefFoundError` e a aplicação não sobe. Mais importante: pool de conexões não faz sentido no uso reativo do Lettuce, que multiplexa comandos sobre uma única conexão — pooling existe para o uso imperativo/bloqueante.
+
+**Consequência:** uma dependência a menos e menos configuração. Se algum dia o código passar a usar a API blocante do Redis, o pool (e o `commons-pool2`) voltam a ser necessários.
+
+---
+
+## D20 — `max-wait-duration: 0` em todos os bulkheads
+
+**Decisão:** nenhuma instância de bulkhead espera por permissão.
+
+**Por quê:** o `SemaphoreBulkhead` do Resilience4j implementa a espera com `Semaphore.tryAcquire(long, TimeUnit)`, que **bloqueia a thread chamadora**. No `BulkheadOperator` essa aquisição acontece na thread que assina o fluxo — ou seja, um event loop do Netty. A configuração inicial tinha `50ms` e `100ms` nas instâncias de banco, o que bloquearia o event loop sob saturação: exatamente o inverso do objetivo.
+
+**Consequência:** sob saturação a rejeição é imediata (`BulkheadFullException` → HTTP 429), sem fila. Quem precisa de enfileiramento deve fazê-lo com operadores do Reactor (`limitRate`, `onBackpressureBuffer`), não com o bulkhead.
+
+---
+
+## D21 — Uma instância de resiliência por operação, sem timeout duplicado
+
+**Decisão:** a listagem paginada ganhou sua própria instância `product-database-list` (TimeLimiter 3 s), e os timeouts que existiam em `catalog.data-access.*` foram removidos. O TimeLimiter de cada instância é a única autoridade sobre o prazo da chamada.
+
+**Por quê:** leitura por SKU e listagem paginada tinham perfis de latência diferentes e compartilhavam a mesma instância, o que forçava um `.timeout()` manual por cima do TimeLimiter — dois números para manter em sincronia, com o menor sempre ganhando de forma não óbvia. Também foram removidos `call-timeout` e `fail-fast-on-open-circuit` dos endpoints, que nunca eram lidos pelo código.
+
+**Consequência:** sete instâncias em vez de seis, e o prazo de cada operação se lê em um único lugar. O `response-timeout` do Netty continua existindo como guarda de nível mais baixo, sempre folgado em relação ao TimeLimiter.
+
+---
+
+## D22 — UID numérico na imagem e no pod
+
+**Decisão:** o `Dockerfile` cria o usuário com `-u 10001` e declara `USER 10001:10001`; o Deployment declara `runAsUser: 10001` junto de `runAsNonRoot: true`.
+
+**Por quê:** com `runAsNonRoot: true` e um `USER` por nome (`USER catalog`), o kubelet não consegue provar que o usuário não é root e o container falha com `CreateContainerConfigError`. A versão inicial tinha exatamente essa combinação.
+
+**Consequência:** o pod também roda com `readOnlyRootFilesystem: true`, o que exigiu um `emptyDir` montado em `/tmp` para a JVM.
