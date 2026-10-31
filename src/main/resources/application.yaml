@@ -33,12 +33,6 @@ spring:
       connect-timeout: 200ms
       client-type: lettuce
       lettuce:
-        pool:
-          enabled: true
-          max-active: 32
-          max-idle: 16
-          min-idle: 4
-          max-wait: 100ms
         shutdown-timeout: 100ms
 
 server:
@@ -57,9 +51,6 @@ catalog:
     persistence-parallelism: ${PERSISTENCE_PARALLELISM:0}
     enrichment-parallelism: ${ENRICHMENT_PARALLELISM:0}
   data-access:
-    read-timeout: 1500ms
-    write-timeout: 2500ms
-    list-timeout: 3s
     max-page-size: 100
   cache:
     enabled: true
@@ -76,26 +67,20 @@ catalog:
         base-url: ${PRICING_BASE_URL:http://localhost:8081}
         connect-timeout: 200ms
         response-timeout: 900ms
-        call-timeout: 800ms
         max-connections: 50
         pending-acquire-timeout: 300ms
-        fail-fast-on-open-circuit: true
       inventory-service:
         base-url: ${INVENTORY_BASE_URL:http://localhost:8081}
         connect-timeout: 200ms
         response-timeout: 700ms
-        call-timeout: 600ms
         max-connections: 60
         pending-acquire-timeout: 300ms
-        fail-fast-on-open-circuit: true
       rating-service:
         base-url: ${RATING_BASE_URL:http://localhost:8081}
         connect-timeout: 150ms
         response-timeout: 500ms
-        call-timeout: 400ms
         max-connections: 30
         pending-acquire-timeout: 200ms
-        fail-fast-on-open-circuit: true
 
 resilience4j:
   circuitbreaker:
@@ -148,6 +133,12 @@ resilience4j:
         minimum-number-of-calls: 20
         slow-call-duration-threshold: 1500ms
         wait-duration-in-open-state: 5s
+      product-database-list:
+        base-config: default
+        sliding-window-size: 30
+        minimum-number-of-calls: 10
+        slow-call-duration-threshold: 3s
+        wait-duration-in-open-state: 5s
       product-database-write:
         base-config: default
         sliding-window-size: 20
@@ -175,6 +166,9 @@ resilience4j:
       product-database-read:
         base-config: default
         limit-for-period: 1000
+      product-database-list:
+        base-config: default
+        limit-for-period: 200
       product-database-write:
         base-config: default
         limit-for-period: 100
@@ -198,10 +192,13 @@ resilience4j:
         max-wait-duration: 0
       product-database-read:
         max-concurrent-calls: 60
-        max-wait-duration: 50ms
+        max-wait-duration: 0
+      product-database-list:
+        max-concurrent-calls: 20
+        max-wait-duration: 0
       product-database-write:
         max-concurrent-calls: 20
-        max-wait-duration: 100ms
+        max-wait-duration: 0
       product-cache:
         max-concurrent-calls: 100
         max-wait-duration: 0
@@ -222,6 +219,9 @@ resilience4j:
         cancel-running-future: true
       product-database-read:
         timeout-duration: 1500ms
+        cancel-running-future: true
+      product-database-list:
+        timeout-duration: 3s
         cancel-running-future: true
       product-database-write:
         timeout-duration: 2500ms
@@ -268,6 +268,9 @@ resilience4j:
         base-config: default
         max-attempts: 2
         wait-duration: 100ms
+      product-database-list:
+        base-config: default
+        max-attempts: 1
       product-database-write:
         base-config: default
         max-attempts: 1

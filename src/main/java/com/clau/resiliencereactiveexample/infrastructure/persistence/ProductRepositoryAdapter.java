@@ -30,6 +30,7 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
     private final ChaosSwitch chaosSwitch;
     private final Scheduler persistenceScheduler;
     private final ResiliencePipeline readPipeline;
+    private final ResiliencePipeline listPipeline;
     private final ResiliencePipeline writePipeline;
 
     public ProductRepositoryAdapter(ProductR2dbcRepository repository,
@@ -44,6 +45,7 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
         this.chaosSwitch = chaosSwitch;
         this.persistenceScheduler = persistenceScheduler;
         this.readPipeline = pipelineFactory.pipeline(ResilienceNames.PRODUCT_DATABASE_READ);
+        this.listPipeline = pipelineFactory.pipeline(ResilienceNames.PRODUCT_DATABASE_LIST);
         this.writePipeline = pipelineFactory.pipeline(ResilienceNames.PRODUCT_DATABASE_WRITE);
     }
 
@@ -51,12 +53,13 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
     public Mono<Product> findBySku(String sku) {
         Mono<Product> query = injectedChaos()
                 .then(repository.findBySkuAndActiveIsTrue(sku))
+                .publishOn(persistenceScheduler)
                 .map(ProductRow::toDomain)
-                .timeout(properties.readTimeout())
-                .doOnSubscribe(subscription -> log.debug("database read started sku={} thread={}", sku, Thread.currentThread().getName()))
-                .doOnNext(product -> log.debug("database read completed sku={} id={}", sku, product.id()));
+                .doOnSubscribe(subscription -> log.debug("database read started sku={}", sku))
+                .doOnNext(product -> log.debug("database read completed sku={} id={} thread={}",
+                        sku, product.id(), Thread.currentThread().getName()));
 
-        return readPipeline.protect(query).subscribeOn(persistenceScheduler);
+        return readPipeline.protect(query);
     }
 
     @Override
@@ -67,28 +70,28 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
 
         Flux<Product> query = injectedChaos()
                 .thenMany(repository.findAllByActiveIsTrue(pageRequest))
-                .map(ProductRow::toDomain)
-                .timeout(properties.listTimeout());
+                .publishOn(persistenceScheduler)
+                .map(ProductRow::toDomain);
 
-        return readPipeline.protect(query).subscribeOn(persistenceScheduler);
+        return listPipeline.protect(query);
     }
 
     @Override
     public Mono<Long> countActive() {
-        return readPipeline.protect(repository.countByActiveIsTrue().timeout(properties.readTimeout()))
-                .subscribeOn(persistenceScheduler);
+        return readPipeline.protect(injectedChaos().then(repository.countByActiveIsTrue()));
     }
 
     @Override
     public Mono<Product> create(Product product) {
         Mono<Product> insert = repository.existsBySku(product.sku())
                 .flatMap(exists -> exists
-                        ? Mono.error(new DuplicatedSkuException(product.sku()))
-                        : template.insert(ProductRow.fromDomain(product)).map(ProductRow::toDomain))
-                .timeout(properties.writeTimeout())
+                        ? Mono.<ProductRow>error(new DuplicatedSkuException(product.sku()))
+                        : template.insert(ProductRow.fromDomain(product)))
+                .publishOn(persistenceScheduler)
+                .map(ProductRow::toDomain)
                 .doOnNext(created -> log.info("product persisted sku={} id={}", created.sku(), created.id()));
 
-        return writePipeline.protect(insert).subscribeOn(persistenceScheduler);
+        return writePipeline.protect(insert);
     }
 
     private Mono<Void> injectedChaos() {

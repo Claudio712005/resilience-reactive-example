@@ -41,9 +41,10 @@ public class InventoryHttpAdapter implements InventoryPort {
                         .defaultIfEmpty("")
                         .map(body -> new DownstreamClientException(ResilienceNames.INVENTORY_SERVICE, response.statusCode().value(), body)))
                 .bodyToMono(InventoryResponse.class)
+                .publishOn(integrationScheduler)
                 .map(response -> toDomain(sku, response));
 
-        return pipeline.protect(call).subscribeOn(integrationScheduler);
+        return pipeline.protect(call);
     }
 
     private Availability toDomain(String sku, InventoryResponse response) {

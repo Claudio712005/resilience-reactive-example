@@ -25,10 +25,8 @@ public record IntegrationProperties(@Valid Map<String, Endpoint> endpoints) {
             @NotBlank String baseUrl,
             @NotNull Duration connectTimeout,
             @NotNull Duration responseTimeout,
-            @NotNull Duration callTimeout,
             int maxConnections,
-            @NotNull Duration pendingAcquireTimeout,
-            boolean failFastOnOpenCircuit) {
+            @NotNull Duration pendingAcquireTimeout) {
 
         public Endpoint {
             if (maxConnections <= 0) {

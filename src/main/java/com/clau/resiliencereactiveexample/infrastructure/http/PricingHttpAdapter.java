@@ -43,9 +43,10 @@ public class PricingHttpAdapter implements PricingPort {
                         .defaultIfEmpty("")
                         .map(body -> new DownstreamClientException(ResilienceNames.PRICING_SERVICE, response.statusCode().value(), body)))
                 .bodyToMono(PricingResponse.class)
+                .publishOn(integrationScheduler)
                 .map(response -> toDomain(sku, response));
 
-        return pipeline.protect(call).subscribeOn(integrationScheduler);
+        return pipeline.protect(call);
     }
 
     private PriceQuote toDomain(String sku, PricingResponse response) {

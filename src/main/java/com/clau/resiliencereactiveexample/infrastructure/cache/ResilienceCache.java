@@ -5,7 +5,6 @@ import com.clau.resiliencereactiveexample.infrastructure.chaos.ChaosSwitch;
 import com.clau.resiliencereactiveexample.resilience.ResilienceNames;
 import com.clau.resiliencereactiveexample.resilience.ResiliencePipeline;
 import com.clau.resiliencereactiveexample.resilience.ResiliencePipelineFactory;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
@@ -13,8 +12,11 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 import reactor.core.publisher.Mono;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -26,7 +28,7 @@ public class ResilienceCache {
     private static final String TIER_REMOTE = "remote";
 
     private final ReactiveStringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
     private final CacheProperties properties;
     private final ChaosSwitch chaosSwitch;
     private final MeterRegistry meterRegistry;
@@ -34,13 +36,13 @@ public class ResilienceCache {
     private final Cache<String, String> localCache;
 
     public ResilienceCache(ReactiveStringRedisTemplate redisTemplate,
-                           ObjectMapper objectMapper,
+                           JsonMapper jsonMapper,
                            CacheProperties properties,
                            ChaosSwitch chaosSwitch,
                            MeterRegistry meterRegistry,
                            ResiliencePipelineFactory pipelineFactory) {
         this.redisTemplate = redisTemplate;
-        this.objectMapper = objectMapper;
+        this.jsonMapper = jsonMapper;
         this.properties = properties;
         this.chaosSwitch = chaosSwitch;
         this.meterRegistry = meterRegistry;
@@ -85,6 +87,10 @@ public class ResilienceCache {
     }
 
     public Mono<Void> evict(String region, String key) {
+        if (!properties.enabled()) {
+            return Mono.empty();
+        }
+
         String namespacedKey = region + ":" + key;
         localCache.invalidate(namespacedKey);
         return guardedRedis(
@@ -112,24 +118,39 @@ public class ResilienceCache {
                 .get(properties.remoteKey(namespacedKey))
                 .timeout(properties.remoteTimeout());
 
-        return guardedRedis(lookup, region, "read")
+        AtomicBoolean lookupFailed = new AtomicBoolean(false);
+
+        return guardedRedis(lookup, region, "read", error -> lookupFailed.set(true))
+                .switchIfEmpty(Mono.fromRunnable(() -> {
+                    if (!lookupFailed.get()) {
+                        count(region, "miss", TIER_REMOTE);
+                    }
+                }))
                 .flatMap(payload -> {
                     count(region, "hit", TIER_REMOTE);
                     if (properties.localEnabled()) {
                         localCache.put(namespacedKey, payload);
                     }
                     return deserialize(payload, type, region);
-                })
-                .switchIfEmpty(Mono.fromRunnable(() -> count(region, "miss", TIER_REMOTE)));
+                });
     }
 
     private <T> Mono<T> guardedRedis(Supplier<Mono<T>> operation, String region, String action) {
+        return guardedRedis(operation, region, action, error -> {
+        });
+    }
+
+    private <T> Mono<T> guardedRedis(Supplier<Mono<T>> operation,
+                                     String region,
+                                     String action,
+                                     Consumer<Throwable> onFailure) {
         Mono<T> withChaos = Mono.defer(() -> chaosSwitch.isRedisUnavailable()
                 ? Mono.error(new CacheUnavailableException("redis marked unavailable by chaos switch"))
                 : operation.get());
 
         return pipeline.protect(withChaos)
                 .onErrorResume(error -> {
+                    onFailure.accept(error);
                     count(region, "error", TIER_REMOTE);
                     log.warn("cache degraded to no-op region={} action={} error={} message={}",
                             region, action, error.getClass().getSimpleName(), error.getMessage());
@@ -138,7 +159,7 @@ public class ResilienceCache {
     }
 
     private <T> Mono<String> serialize(T value) {
-        return Mono.fromCallable(() -> objectMapper.writeValueAsString(value))
+        return Mono.fromCallable(() -> jsonMapper.writeValueAsString(value))
                 .onErrorResume(error -> {
                     log.warn("cache serialization failed type={} error={}",
                             value.getClass().getSimpleName(), error.getMessage());
@@ -147,7 +168,7 @@ public class ResilienceCache {
     }
 
     private <T> Mono<T> deserialize(String payload, Class<T> type, String region) {
-        return Mono.fromCallable(() -> objectMapper.readValue(payload, type))
+        return Mono.fromCallable(() -> jsonMapper.readValue(payload, type))
                 .onErrorResume(error -> {
                     count(region, "error", TIER_LOCAL);
                     log.warn("cache deserialization failed region={} type={} error={}",

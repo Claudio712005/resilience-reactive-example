@@ -166,6 +166,11 @@ public class ProductCatalogService {
                 .tag("degraded", "true")
                 .register(meterRegistry)
                 .record(Duration.ofNanos(System.nanoTime() - startedAt));
+
+        if (error instanceof ProductNotFoundException) {
+            log.info("product view not found message={}", error.getMessage());
+            return;
+        }
         log.error("product view failed error={} message={}", error.getClass().getSimpleName(), error.getMessage());
     }
 }
