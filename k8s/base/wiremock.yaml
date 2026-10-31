@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiremock
+  labels:
+    app.kubernetes.io/name: wiremock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wiremock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wiremock
+    spec:
+      containers:
+        - name: wiremock
+          image: wiremock/wiremock:3.13.1
+          args: ["--global-response-templating", "--disable-banner"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /__admin/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+      volumes:
+        - name: mappings
+          configMap:
+            name: wiremock-mappings
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiremock
+spec:
+  selector:
+    app.kubernetes.io/name: wiremock
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
