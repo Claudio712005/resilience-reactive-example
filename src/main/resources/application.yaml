@@ -33,12 +33,6 @@ spring:
       connect-timeout: 200ms
       client-type: lettuce
       lettuce:
-        pool:
-          enabled: true
-          max-active: 32
-          max-idle: 16
-          min-idle: 4
-          max-wait: 100ms
         shutdown-timeout: 100ms
 
 server:
