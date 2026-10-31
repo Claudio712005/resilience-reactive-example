@@ -1,0 +1,23 @@
+{
+  "name": "pricing flaky recovered",
+  "priority": 1,
+  "scenarioName": "pricing-flaky",
+  "requiredScenarioState": "recovered",
+  "request": {
+    "method": "GET",
+    "urlPath": "/pricing/v1/quotes/SKU-FLAKY-9003"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "SKU-FLAKY-9003",
+      "finalPrice": 399.9,
+      "currency": "BRL",
+      "discountPercentage": 5.0
+    },
+    "fixedDelayMilliseconds": 60
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "pricing slow response above time limiter",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/pricing/v1/quotes/SKU-SLOW-9001"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "SKU-SLOW-9001",
+      "finalPrice": 199.9,
+      "currency": "BRL",
+      "discountPercentage": 0.0
+    },
+    "fixedDelayMilliseconds": 3000
+  }
+}

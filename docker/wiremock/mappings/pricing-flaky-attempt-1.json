@@ -1,0 +1,20 @@
+{
+  "name": "pricing flaky first attempt fails",
+  "priority": 1,
+  "scenarioName": "pricing-flaky",
+  "requiredScenarioState": "Started",
+  "newScenarioState": "second-attempt",
+  "request": {
+    "method": "GET",
+    "urlPath": "/pricing/v1/quotes/SKU-FLAKY-9003"
+  },
+  "response": {
+    "status": 503,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "error": "pricing engine warming up"
+    }
+  }
+}

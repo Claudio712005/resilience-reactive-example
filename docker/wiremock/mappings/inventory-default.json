@@ -1,0 +1,21 @@
+{
+  "name": "inventory default availability",
+  "priority": 10,
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/inventory/v1/availability/[A-Za-z0-9-]+"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "sku": "{{request.pathSegments.[3]}}",
+      "quantity": 42,
+      "warehouse": "SP-GUARULHOS-01"
+    },
+    "fixedDelayMilliseconds": 50,
+    "transformers": ["response-template"]
+  }
+}
