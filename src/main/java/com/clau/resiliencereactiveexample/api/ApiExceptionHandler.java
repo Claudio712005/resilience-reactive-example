@@ -9,6 +9,7 @@ import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -31,6 +32,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DuplicatedSkuException.class)
     public Mono<ResponseEntity<ApiError>> handleDuplicated(DuplicatedSkuException exception) {
         return build(HttpStatus.CONFLICT, "DUPLICATED_SKU", exception.getMessage());
+    }
+
+    @ExceptionHandler(DuplicateKeyException.class)
+    public Mono<ResponseEntity<ApiError>> handleConcurrentDuplicate(DuplicateKeyException exception) {
+        return build(HttpStatus.CONFLICT, "DUPLICATED_SKU", "Product already registered for this sku");
     }
 
     @ExceptionHandler(WebExchangeBindException.class)
