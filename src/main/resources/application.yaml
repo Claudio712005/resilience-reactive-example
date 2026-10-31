@@ -192,10 +192,10 @@ resilience4j:
         max-wait-duration: 0
       product-database-read:
         max-concurrent-calls: 60
-        max-wait-duration: 50ms
+        max-wait-duration: 0
       product-database-write:
         max-concurrent-calls: 20
-        max-wait-duration: 100ms
+        max-wait-duration: 0
       product-cache:
         max-concurrent-calls: 100
         max-wait-duration: 0
