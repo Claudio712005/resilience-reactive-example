@@ -85,10 +85,6 @@ public final class ResiliencePipeline {
         });
     }
 
-    public <T> Mono<T> protectWithValue(Mono<T> source, T fallbackValue) {
-        return protectWithFallback(source, error -> Mono.justOrEmpty(fallbackValue));
-    }
-
     private void recordFallback(Throwable error) {
         Counter.builder("catalog.resilience.fallback")
                 .description("Calls that fell back after the resilience pipeline rejected or failed them")
